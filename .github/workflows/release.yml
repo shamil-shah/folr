@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: 'stable'
+
+      - name: Build Binaries
+        run: |
+          mkdir -p dist
+          TAG_NAME="${GITHUB_REF_NAME}"
+
+          # Linux amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/folr-linux-amd64 ./cmd/folr
+          tar -czf "dist/folr_${TAG_NAME}_linux_amd64.tar.gz" -C dist folr-linux-amd64
+
+          # Linux arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/folr-linux-arm64 ./cmd/folr
+          tar -czf "dist/folr_${TAG_NAME}_linux_arm64.tar.gz" -C dist folr-linux-arm64
+
+          # Windows amd64
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/folr-windows-amd64.exe ./cmd/folr
+          zip -j "dist/folr_${TAG_NAME}_windows_amd64.zip" dist/folr-windows-amd64.exe
+
+          # Compute SHA-256 Checksums
+          cd dist
+          sha256sum folr_${TAG_NAME}_linux_amd64.tar.gz folr_${TAG_NAME}_linux_arm64.tar.gz folr_${TAG_NAME}_windows_amd64.zip > SHA256SUMS
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
+        with:
+          files: |
+            dist/folr_*_linux_amd64.tar.gz
+            dist/folr_*_linux_arm64.tar.gz
+            dist/folr_*_windows_amd64.zip
+            dist/SHA256SUMS
+          generate_release_notes: true
+

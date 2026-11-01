@@ -1,0 +1,17 @@
+# Example folr configuration file (rules.toml)
+# Place this at .folr.toml in your directory, or in ~/.config/folr/rules.toml
+
+[categories]
+Images = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "tiff"]
+Documents = ["pdf", "doc", "docx", "odt", "txt", "rtf", "md", "xls", "xlsx", "ods", "ppt", "pptx", "csv"]
+Archives = ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz"]
+Videos = ["mp4", "mkv", "avi", "mov", "webm", "flv"]
+Audio = ["mp3", "wav", "flac", "ogg", "m4a", "aac"]
+Installers = ["exe", "msi", "deb", "rpm", "dmg", "appimage", "apk"]
+Code = ["py", "go", "js", "ts", "c", "cpp", "java", "rs", "sh", "json", "yaml", "yml", "html", "css"]
+Books = ["epub", "mobi", "azw3", "djvu"]
+
+[settings]
+# Files modified within this time window (in seconds) are skipped to avoid moving files actively being downloaded or written
+skip_recent_seconds = 10
+
