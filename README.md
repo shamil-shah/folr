@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/shamil-shah/folr/actions/workflows/ci.yml/badge.svg)](https://github.com/shamil-shah/folr/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go)](https://go.dev/)
 
 `folr` (short for *folder*) is a fast, security-first, and atomic command-line tool that cleans up cluttered directories by sorting files into categorized folders based on their extensions.
 

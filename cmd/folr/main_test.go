@@ -9,6 +9,15 @@ import (
 	"github.com/shamil-shah/folr/internal/safety"
 )
 
+// testArgs appends --allow-root if running in an elevated environment (e.g. Windows CI Administrator)
+func testArgs(args ...string) []string {
+	isPriv, _ := safety.IsPrivilegedUser()
+	if isPriv {
+		return append(args, "--allow-root")
+	}
+	return args
+}
+
 func TestCLI_OrganizeAndUndo(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -23,7 +32,7 @@ func TestCLI_OrganizeAndUndo(t *testing.T) {
 	_ = os.Chtimes(file2, past, past)
 
 	// 1. Run folr with -y on tempDir
-	exitCode := run([]string{"-y", tempDir})
+	exitCode := run(testArgs("-y", tempDir))
 	if exitCode != safety.ExitSuccess {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
@@ -43,7 +52,7 @@ func TestCLI_OrganizeAndUndo(t *testing.T) {
 	}
 
 	// 2. Run folr --undo on tempDir
-	undoCode := run([]string{"--undo", tempDir})
+	undoCode := run(testArgs("--undo", tempDir))
 	if undoCode != safety.ExitSuccess {
 		t.Fatalf("expected undo exit code 0, got %d", undoCode)
 	}
@@ -70,7 +79,7 @@ func TestCLI_DryRun_ChangesNothing(t *testing.T) {
 	past := time.Now().Add(-20 * time.Second)
 	_ = os.Chtimes(file1, past, past)
 
-	exitCode := run([]string{"--dry-run", tempDir})
+	exitCode := run(testArgs("--dry-run", tempDir))
 	if exitCode != safety.ExitSuccess {
 		t.Fatalf("expected exit code 0 for dry-run, got %d", exitCode)
 	}
@@ -110,7 +119,7 @@ func TestCLI_FolderWithSpaces(t *testing.T) {
 	past := time.Now().Add(-20 * time.Second)
 	_ = os.Chtimes(file1, past, past)
 
-	exitCode := run([]string{"-y", folderWithSpace})
+	exitCode := run(testArgs("-y", folderWithSpace))
 	if exitCode != safety.ExitSuccess {
 		t.Fatalf("expected exit code 0 for directory with spaces, got %d", exitCode)
 	}
@@ -132,4 +141,3 @@ func TestCLI_VersionAndHelp(t *testing.T) {
 		t.Errorf("expected code 2 for invalid flag, got %d", code)
 	}
 }
-
