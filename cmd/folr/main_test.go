@@ -9,11 +9,11 @@ import (
 	"github.com/shamil-shah/folr/internal/safety"
 )
 
-// testArgs appends --allow-root if running in an elevated environment (e.g. Windows CI Administrator)
+// testArgs ensures --allow-root is supplied if running in an elevated environment (e.g. Windows CI Administrator)
 func testArgs(args ...string) []string {
 	isPriv, _ := safety.IsPrivilegedUser()
 	if isPriv {
-		return append(args, "--allow-root")
+		return append([]string{"--allow-root"}, args...)
 	}
 	return args
 }

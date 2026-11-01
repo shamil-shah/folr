@@ -26,6 +26,7 @@ func main() {
 }
 
 func run(args []string) int {
+	args = normalizeArgs(args)
 	fs := flag.NewFlagSet("folr", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -254,5 +255,26 @@ func handleUndo(targetDir string) int {
 	_ = os.Remove(logPath)
 
 	return safety.ExitSuccess
+}
+
+// normalizeArgs reorders arguments so that flags always precede positional arguments,
+// enabling users to place flags anywhere on the command line.
+func normalizeArgs(args []string) []string {
+	var flags []string
+	var nonFlags []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			// String flag that takes a parameter (e.g. --config file.toml)
+			if (arg == "--config" || arg == "-config") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				flags = append(flags, args[i])
+			}
+		} else {
+			nonFlags = append(nonFlags, arg)
+		}
+	}
+	return append(flags, nonFlags...)
 }
 

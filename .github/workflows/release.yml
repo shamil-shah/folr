@@ -38,8 +38,8 @@ jobs:
           tar -czf "dist/folr_${TAG_NAME}_linux_arm64.tar.gz" -C dist folr-linux-arm64
 
           # Windows amd64
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/folr-windows-amd64.exe ./cmd/folr
-          zip -j "dist/folr_${TAG_NAME}_windows_amd64.zip" dist/folr-windows-amd64.exe
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/folr.exe ./cmd/folr
+          zip -j "dist/folr_${TAG_NAME}_windows_amd64.zip" dist/folr.exe
 
           # Compute SHA-256 Checksums
           cd dist
