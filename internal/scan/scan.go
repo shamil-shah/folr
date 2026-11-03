@@ -70,6 +70,11 @@ func ScanDirectory(targetDir string, r *rules.Rules) (*ScanResult, error) {
 	}
 	recentThreshold := time.Duration(skipRecentSec) * time.Second
 
+	// Identify current running executable to never self-organize the folr binary
+	execPath, _ := os.Executable()
+	realExecPath, _ := filepath.EvalSymlinks(execPath)
+	execName := filepath.Base(execPath)
+
 	for _, entry := range entries {
 		name := entry.Name()
 		fullPath := filepath.Join(targetDir, name)
@@ -116,6 +121,16 @@ func ScanDirectory(targetDir string, r *rules.Rules) (*ScanResult, error) {
 				Name:   name,
 				Path:   fullPath,
 				Reason: "folr internal file",
+			})
+			continue
+		}
+
+		// Skip folr's own executable binary if running directly in targetDir
+		if (execName != "" && strings.EqualFold(name, execName)) || (realExecPath != "" && fullPath == realExecPath) {
+			result.Skipped = append(result.Skipped, SkippedFile{
+				Name:   name,
+				Path:   fullPath,
+				Reason: "folr executable binary",
 			})
 			continue
 		}

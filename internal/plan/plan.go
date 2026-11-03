@@ -37,7 +37,7 @@ type Plan struct {
 // normalizePathKey creates a canonical key for collision tracking across platforms.
 func normalizePathKey(p string) string {
 	clean := filepath.Clean(p)
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		return strings.ToLower(clean)
 	}
 	return clean
@@ -123,6 +123,15 @@ func BuildPlan(scanResult *scan.ScanResult, r *rules.Rules) (*Plan, error) {
 // or files already planned in the same batch (e.g. photo.jpg -> photo (1).jpg -> photo (2).jpg).
 func resolveDestination(categoryDir, originalName string, plannedDests map[string]bool) (string, string, error) {
 	cleanName := filepath.Base(originalName)
+
+	// Windows disallows trailing dots and spaces in file names
+	if runtime.GOOS == "windows" {
+		cleanName = strings.TrimRight(cleanName, ". ")
+		if cleanName == "" {
+			cleanName = "file"
+		}
+	}
+
 	ext := filepath.Ext(cleanName)
 	base := strings.TrimSuffix(cleanName, ext)
 

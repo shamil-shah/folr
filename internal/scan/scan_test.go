@@ -60,6 +60,13 @@ func TestScanDirectory(t *testing.T) {
 	symlinkPath := filepath.Join(tempDir, "symlink_file.txt")
 	_ = os.Symlink(symlinkTarget, symlinkPath)
 
+	// 8. Own executable binary file (must be skipped)
+	execPath, _ := os.Executable()
+	execName := filepath.Base(execPath)
+	ownBinary := filepath.Join(tempDir, execName)
+	_ = os.WriteFile(ownBinary, []byte("fake binary"), 0755)
+	_ = os.Chtimes(ownBinary, oldTime, oldTime)
+
 	r := rules.DefaultRules()
 	res, err := ScanDirectory(tempDir, r)
 	if err != nil {
@@ -70,6 +77,10 @@ func TestScanDirectory(t *testing.T) {
 	candidates := make(map[string]bool)
 	for _, f := range res.Files {
 		candidates[f.Name] = true
+	}
+
+	if candidates[execName] {
+		t.Errorf("running binary %s should never be a candidate file to move", execName)
 	}
 
 	if !candidates["photo.jpg"] {

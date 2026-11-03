@@ -81,7 +81,9 @@ func ExecutePlan(p *plan.Plan, histSession *history.Session) (*MoveResult, error
 
 		// 5. Append to atomic history session
 		if histSession != nil {
-			_ = histSession.RecordMove(action.SourcePath, action.DestPath, srcFi.Size(), srcFi.ModTime(), fileHash)
+			if logErr := histSession.RecordMove(action.SourcePath, action.DestPath, srcFi.Size(), srcFi.ModTime(), fileHash); logErr != nil {
+				result.Messages = append(result.Messages, fmt.Sprintf("Warning: could not record undo log for %s: %v", action.SourceName, logErr))
+			}
 		}
 
 		result.MovedCount++
@@ -124,7 +126,11 @@ func copyAndVerifyMove(src, dst string, srcFi os.FileInfo) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer dstFile.Close()
+
+	cleanupDst := func() {
+		_ = dstFile.Close()
+		_ = os.Remove(dst)
+	}
 
 	hashSrc := sha256.New()
 	hashDst := sha256.New()
@@ -134,24 +140,24 @@ func copyAndVerifyMove(src, dst string, srcFi os.FileInfo) (string, error) {
 
 	written, err := io.Copy(mw, tee)
 	if err != nil {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return "", fmt.Errorf("copy interrupted: %w", err)
 	}
 
 	if err := dstFile.Sync(); err != nil {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return "", fmt.Errorf("file sync failed: %w", err)
 	}
 
 	if written != srcFi.Size() {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return "", fmt.Errorf("size mismatch: wrote %d bytes, expected %d", written, srcFi.Size())
 	}
 
 	srcSum := hex.EncodeToString(hashSrc.Sum(nil))
 	dstSum := hex.EncodeToString(hashDst.Sum(nil))
 	if srcSum != dstSum {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return "", errors.New("SHA-256 checksum mismatch after copy")
 	}
 
@@ -159,8 +165,10 @@ func copyAndVerifyMove(src, dst string, srcFi os.FileInfo) (string, error) {
 	_ = os.Chmod(dst, srcFi.Mode().Perm())
 	_ = os.Chtimes(dst, srcFi.ModTime(), srcFi.ModTime())
 
-	// Close source file before removing
+	// Explicitly close both descriptors before removing source or destination on Windows
 	_ = srcFile.Close()
+	_ = dstFile.Close()
+
 	if err := os.Remove(src); err != nil {
 		// If source deletion fails, remove dst to prevent duplication
 		_ = os.Remove(dst)

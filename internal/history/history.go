@@ -44,9 +44,11 @@ type OperationRecord struct {
 
 // Session manages the real-time writing of the operation history.
 type Session struct {
-	record  *OperationRecord
-	logPath string
-	dir     string
+	record      *OperationRecord
+	logPath     string
+	journalPath string
+	journalFile *os.File
+	dir         string
 }
 
 // GetHistoryDir returns the secure directory for storing folr history logs.
@@ -88,6 +90,7 @@ func StartSession(targetDir string) (*Session, error) {
 
 	id := generateID()
 	logPath := filepath.Join(histDir, fmt.Sprintf("run-%s.json", id))
+	journalPath := logPath + ".journal"
 
 	record := &OperationRecord{
 		ID:        id,
@@ -96,14 +99,22 @@ func StartSession(targetDir string) (*Session, error) {
 		Entries:   make([]FileRecord, 0),
 	}
 
-	s := &Session{
-		record:  record,
-		logPath: logPath,
-		dir:     histDir,
+	jFile, err := os.OpenFile(journalPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, HistoryFilePerm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session journal: %w", err)
 	}
 
-	if err := s.saveAtomic(); err != nil {
-		return nil, err
+	// Write header containing session ID and TargetDir
+	header, _ := json.Marshal(record)
+	_, _ = jFile.Write(append(header, '\n'))
+	_ = jFile.Sync()
+
+	s := &Session{
+		record:      record,
+		logPath:     logPath,
+		journalPath: journalPath,
+		journalFile: jFile,
+		dir:         histDir,
 	}
 
 	// Prune old history files to keep only the latest 20
@@ -112,22 +123,42 @@ func StartSession(targetDir string) (*Session, error) {
 	return s, nil
 }
 
-// RecordMove appends a successfully moved file to the session and atomically updates disk.
+// RecordMove appends a successfully moved file to the session journal in O(1) time.
 func (s *Session) RecordMove(sourcePath, destPath string, size int64, modTime time.Time, hash string) error {
-	s.record.Entries = append(s.record.Entries, FileRecord{
+	entry := FileRecord{
 		SourcePath: sourcePath,
 		DestPath:   destPath,
 		Size:       size,
 		ModTime:    modTime,
 		SHA256:     hash,
-	})
-	return s.saveAtomic()
+	}
+	s.record.Entries = append(s.record.Entries, entry)
+
+	if s.journalFile != nil {
+		line, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		if _, err := s.journalFile.Write(append(line, '\n')); err != nil {
+			return err
+		}
+		return s.journalFile.Sync()
+	}
+	return nil
 }
 
-// Finish marks the session as completed and persists the final state.
+// Finish marks the session as completed and persists the final atomic state.
 func (s *Session) Finish() error {
 	s.record.EndedAt = time.Now().UTC()
-	return s.saveAtomic()
+	if s.journalFile != nil {
+		_ = s.journalFile.Close()
+		s.journalFile = nil
+	}
+	if err := s.saveAtomic(); err != nil {
+		return err
+	}
+	_ = os.Remove(s.journalPath)
+	return nil
 }
 
 // saveAtomic writes the history record to a temp file and renames it atomically.
@@ -241,9 +272,9 @@ func ExecuteUndo(record *OperationRecord) (*UndoResult, error) {
 		Messages: make([]string, 0),
 	}
 
-	targetDir := record.TargetDir
-	if err := safety.CheckNotSymlink(targetDir); err != nil {
-		return nil, err
+	targetDir, err := safety.ValidateTargetDirectory(record.TargetDir)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target directory in history log: %w", err)
 	}
 
 	touchedDirs := make(map[string]bool)
@@ -365,6 +396,11 @@ func copyAndVerify(src, dst string) error {
 	}
 	defer dstFile.Close()
 
+	cleanupDst := func() {
+		_ = dstFile.Close()
+		_ = os.Remove(dst)
+	}
+
 	hashSrc := sha256.New()
 	hashDst := sha256.New()
 
@@ -373,27 +409,30 @@ func copyAndVerify(src, dst string) error {
 
 	written, err := io.Copy(mw, tee)
 	if err != nil {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return fmt.Errorf("copy interrupted: %w", err)
 	}
 
 	if err := dstFile.Sync(); err != nil {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return fmt.Errorf("sync failed: %w", err)
 	}
 
 	if written != srcFi.Size() {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return fmt.Errorf("size mismatch during copy (wrote %d, expected %d)", written, srcFi.Size())
 	}
 
 	if hex.EncodeToString(hashSrc.Sum(nil)) != hex.EncodeToString(hashDst.Sum(nil)) {
-		_ = os.Remove(dst)
+		cleanupDst()
 		return errors.New("SHA-256 hash checksum mismatch after copy")
 	}
 
 	_ = os.Chmod(dst, srcFi.Mode().Perm())
 	_ = os.Chtimes(dst, srcFi.ModTime(), srcFi.ModTime())
+
+	_ = srcFile.Close()
+	_ = dstFile.Close()
 
 	return nil
 }
