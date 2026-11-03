@@ -1,0 +1,21 @@
+# Binaries (at repository root)
+/folr
+/folr.exe
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.out
+*.test
+*.prof
+
+# folr runtime & lock files
+.folr.lock
+.folr.toml
+
+# OS generated files
+.DS_Store
+Thumbs.db

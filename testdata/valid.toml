@@ -1,0 +1,7 @@
+[categories]
+Images = ["jpg", "png"]
+Books = ["epub", "mobi"]
+
+[settings]
+skip_recent_seconds = 5
+

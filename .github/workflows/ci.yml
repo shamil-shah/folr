@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test & Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Verify Module Dependencies
+        run: |
+          go mod verify
+          git diff --exit-code go.mod go.sum
+
+      - name: Run Go Vet
+        run: go vet ./...
+
+      - name: Install Staticcheck and Govulncheck (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/staticcheck" ./...
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: Run Unit & Integration Tests
+        run: go test -v -race ./...
+        if: runner.os == 'Linux'
+
+      - name: Run Unit & Integration Tests (Windows)
+        run: go test -v ./...
+        if: runner.os == 'Windows'
+
