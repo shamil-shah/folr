@@ -101,82 +101,113 @@ func ValidateTargetDirectory(target string) (string, error) {
 		return "", NewSecurityError("failed to resolve absolute path for %q: %v", target, err)
 	}
 
-	// Follow symlinks to get canonical real path for validation
+	// Verify target itself is not a symlink
+	absFi, err := os.Lstat(absPath)
+	if err != nil {
+		return "", NewSecurityError("cannot access or evaluate target path %q: %v", target, err)
+	}
+	if absFi.Mode()&os.ModeSymlink != 0 {
+		return "", NewSecurityError("target directory %q is a symlink; folr refuses to operate on symlinks", target)
+	}
+	if !absFi.IsDir() {
+		return "", NewSecurityError("target %q is not a directory", target)
+	}
+
+	// Follow symlinks (if any parent directories are symlinks) to get canonical real path for validation
 	realPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
 		return "", NewSecurityError("cannot access or evaluate target path %q: %v", target, err)
 	}
 
-	// Check with Lstat to ensure the target itself is not a symlink if evaluated differently
-	fi, err := os.Lstat(realPath)
-	if err != nil {
-		return "", NewSecurityError("cannot inspect target directory: %v", err)
-	}
-	if !fi.IsDir() {
-		return "", NewSecurityError("target %q is not a directory", target)
-	}
-
+	cleanAbs := filepath.Clean(absPath)
 	cleanReal := filepath.Clean(realPath)
 
-	// Check filesystem root
-	if cleanReal == "/" || cleanReal == filepath.VolumeName(cleanReal)+string(filepath.Separator) {
-		return "", NewSecurityError("refusing to operate on filesystem root directory (%s)", cleanReal)
-	}
+	for _, p := range []string{cleanAbs, cleanReal} {
+		// Check filesystem root
+		if p == "/" || p == filepath.VolumeName(p)+string(filepath.Separator) {
+			return "", NewSecurityError("refusing to operate on filesystem root directory (%s)", p)
+		}
 
-	// Check user home directory (subdirectories like ~/Downloads are permitted, but home directory itself is forbidden)
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if realHome, err := filepath.EvalSymlinks(home); err == nil {
-			if cleanReal == filepath.Clean(realHome) {
-				return "", NewSecurityError("refusing to operate directly on user home directory (%s). Run on a subdirectory like ~/Downloads instead.", cleanReal)
+		// Check user home directory (subdirectories like ~/Downloads are permitted, but home directory itself is forbidden)
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			if realHome, err := filepath.EvalSymlinks(home); err == nil {
+				if p == filepath.Clean(realHome) || p == filepath.Clean(home) {
+					return "", NewSecurityError("refusing to operate directly on user home directory (%s). Run on a subdirectory like ~/Downloads instead.", p)
+				}
+			}
+		}
+
+		// Check Unix forbidden directories and their direct subdirectories for critical system areas
+		cleanSlash := filepath.ToSlash(p)
+		for _, forbidden := range forbiddenUnixRoots {
+			if cleanSlash == forbidden {
+				return "", NewSecurityError("refusing to operate on forbidden system directory: %s", forbidden)
+			}
+			// Also forbid subdirectories for critical system roots (e.g. /etc/..., /boot/..., /dev/..., /proc/..., /sys/...)
+			if forbidden == "/etc" || forbidden == "/boot" || forbidden == "/dev" || forbidden == "/proc" || forbidden == "/sys" || forbidden == "/root" {
+				if strings.HasPrefix(cleanSlash, forbidden+"/") {
+					return "", NewSecurityError("refusing to operate inside critical system directory: %s", p)
+				}
+			}
+		}
+
+		// Check Windows forbidden system directories
+		vol := filepath.VolumeName(p)
+		pathWithoutVol := p
+		if vol != "" {
+			pathWithoutVol = p[len(vol):]
+		}
+		parts := strings.Split(strings.Trim(filepath.ToSlash(pathWithoutVol), "/"), "/")
+		if len(parts) > 0 {
+			topFolder := strings.ToUpper(parts[0])
+			for _, forbidden := range forbiddenWindowsNames {
+				if topFolder == forbidden {
+					return "", NewSecurityError("refusing to operate on Windows system directory: %s", p)
+				}
 			}
 		}
 	}
 
-	// Check Unix forbidden directories and their direct subdirectories for critical system areas
-	cleanSlash := filepath.ToSlash(cleanReal)
-	for _, forbidden := range forbiddenUnixRoots {
-		if cleanSlash == forbidden {
-			return "", NewSecurityError("refusing to operate on forbidden system directory: %s", forbidden)
-		}
-		// Also forbid subdirectories for critical system roots (e.g. /etc/..., /boot/..., /dev/..., /proc/..., /sys/...)
-		if forbidden == "/etc" || forbidden == "/boot" || forbidden == "/dev" || forbidden == "/proc" || forbidden == "/sys" || forbidden == "/root" {
-			if strings.HasPrefix(cleanSlash, forbidden+"/") {
-				return "", NewSecurityError("refusing to operate inside critical system directory: %s", cleanReal)
-			}
-		}
-	}
-
-	// Check Windows forbidden system directories
-	vol := filepath.VolumeName(cleanReal)
-	pathWithoutVol := cleanReal
-	if vol != "" {
-		pathWithoutVol = cleanReal[len(vol):]
-	}
-	parts := strings.Split(strings.Trim(filepath.ToSlash(pathWithoutVol), "/"), "/")
-	if len(parts) > 0 {
-		topFolder := strings.ToUpper(parts[0])
-		for _, forbidden := range forbiddenWindowsNames {
-			if topFolder == forbidden {
-				return "", NewSecurityError("refusing to operate on Windows system directory: %s", cleanReal)
-			}
-		}
-	}
-
-	return cleanReal, nil
+	return cleanAbs, nil
 }
 
 // ValidateSafeSubpath verifies that targetPath resides strictly inside baseDir,
 // preventing path traversal attacks (e.g., using '..' or symlinks).
 func ValidateSafeSubpath(baseDir, targetPath string) error {
 	rel, err := filepath.Rel(baseDir, targetPath)
-	if err != nil {
-		return NewSecurityError("failed to compute relative path: %v", err)
+	if err == nil {
+		relSlash := filepath.ToSlash(rel)
+		if relSlash != ".." && !strings.HasPrefix(relSlash, "../") && !filepath.IsAbs(rel) {
+			return nil
+		}
 	}
-	relSlash := filepath.ToSlash(rel)
-	if relSlash == ".." || strings.HasPrefix(relSlash, "../") || filepath.IsAbs(rel) {
-		return NewSecurityError("path traversal detected: %q escapes base directory %q", targetPath, baseDir)
+
+	// If direct string comparison failed (e.g. Windows 8.3 short name alias vs long name),
+	// attempt comparison via canonical evaluated paths.
+	realBase, errBase := filepath.EvalSymlinks(baseDir)
+	if errBase == nil {
+		realTarget, errTarget := filepath.EvalSymlinks(targetPath)
+		if errTarget != nil {
+			// If targetPath does not exist yet (e.g. undo restore destination), evaluate parent directory
+			dir := filepath.Dir(targetPath)
+			if realDir, errDir := filepath.EvalSymlinks(dir); errDir == nil {
+				realTarget = filepath.Join(realDir, filepath.Base(targetPath))
+				errTarget = nil
+			}
+		}
+
+		if errTarget == nil {
+			relReal, errRel := filepath.Rel(realBase, realTarget)
+			if errRel == nil {
+				relRealSlash := filepath.ToSlash(relReal)
+				if relRealSlash != ".." && !strings.HasPrefix(relRealSlash, "../") && !filepath.IsAbs(relReal) {
+					return nil
+				}
+			}
+		}
 	}
-	return nil
+
+	return NewSecurityError("path traversal detected: %q escapes base directory %q", targetPath, baseDir)
 }
 
 // CheckNotSymlink verifies that the item at path is not a symlink.

@@ -61,6 +61,28 @@ func TestValidateSafeSubpath(t *testing.T) {
 	}
 }
 
+func TestValidateSafeSubpath_CanonicalEquivalence(t *testing.T) {
+	tempDir := t.TempDir()
+	realDir := filepath.Join(tempDir, "real_base")
+	_ = os.Mkdir(realDir, 0755)
+	aliasDir := filepath.Join(tempDir, "alias_base")
+	if err := os.Symlink(realDir, aliasDir); err == nil {
+		targetFile := filepath.Join(aliasDir, "sub", "file.txt")
+		_ = os.MkdirAll(filepath.Dir(targetFile), 0755)
+		_ = os.WriteFile(targetFile, []byte("ok"), 0644)
+
+		// baseDir is realDir, targetPath uses aliasDir:
+		if err := ValidateSafeSubpath(realDir, targetFile); err != nil {
+			t.Errorf("expected canonical resolution to allow subpath, got error: %v", err)
+		}
+
+		// baseDir is aliasDir, targetPath uses realDir:
+		if err := ValidateSafeSubpath(aliasDir, filepath.Join(realDir, "sub", "file.txt")); err != nil {
+			t.Errorf("expected canonical resolution to allow subpath, got error: %v", err)
+		}
+	}
+}
+
 func TestValidateTargetDirectory_Forbidden(t *testing.T) {
 	// Root directory should be rejected
 	if _, err := ValidateTargetDirectory("/"); err == nil {
@@ -88,6 +110,16 @@ func TestValidateTargetDirectory_Valid(t *testing.T) {
 	}
 	if validated == "" {
 		t.Fatal("expected non-empty validated directory")
+	}
+
+	// Symlink to directory should be rejected
+	subDir := filepath.Join(tempDir, "real")
+	_ = os.Mkdir(subDir, 0755)
+	symLink := filepath.Join(tempDir, "sym")
+	if err := os.Symlink(subDir, symLink); err == nil {
+		if _, err := ValidateTargetDirectory(symLink); err == nil {
+			t.Error("expected symlink directory to be rejected, got nil")
+		}
 	}
 }
 

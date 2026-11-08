@@ -253,6 +253,16 @@ func FindLatestOperation(targetDir string) (*OperationRecord, string, error) {
 		if cleanTarget == "" || filepath.Clean(record.TargetDir) == cleanTarget {
 			return &record, path, nil
 		}
+		// If string comparison differs, check if both paths point to the exact same directory
+		if targetDir != "" {
+			if fi1, err1 := os.Stat(cleanTarget); err1 == nil {
+				if fi2, err2 := os.Stat(record.TargetDir); err2 == nil {
+					if os.SameFile(fi1, fi2) {
+						return &record, path, nil
+					}
+				}
+			}
+		}
 	}
 
 	return nil, "", fmt.Errorf("no history operation found matching directory %s", targetDir)
