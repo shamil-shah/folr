@@ -18,7 +18,7 @@ import (
 	"github.com/shamil-shah/folr/internal/ui"
 )
 
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 func main() {
 	exitCode := run(os.Args[1:])
